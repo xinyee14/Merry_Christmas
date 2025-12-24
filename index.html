@@ -1,0 +1,442 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Interactive Xmas Tree</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body {
+            margin: 0;
+            background-color: #010804;
+            overflow: hidden;
+            font-family: 'Times New Roman', serif;
+        }
+
+        canvas {
+            display: block;
+        }
+
+        #video-container {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            width: 160px;
+            height: 120px;
+            border: 2px solid #00ff6ac9;
+            border-radius: 8px;
+            overflow: hidden;
+            z-index: 100;
+            transform: scaleX(-1);
+        }
+
+        /* Merry Christmas 标题 */
+        #merry-title {
+            position: absolute;
+            top: 5%;
+            left: 50%;
+            transform: translateX(-50%);
+            color: #fffacd;
+            font-size: 35px;
+            font-weight: bold;
+            text-shadow: 0 0 8px #ffd700;
+            z-index: 10;
+        }
+
+        /* 手机端样式 */
+        @media (max-width: 575px) {
+
+            /* 可以根据需要调整断点 */
+            #merry-title {
+                font-size: 28px;
+                /* 变小 */
+                top: 7%;
+                /* 居中垂直 */
+                transform: translate(-50%, -50%);
+                /* 水平+垂直居中 */
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <h1 id="merry-title">Merry Christmas</h1>
+
+    <div id="video-container">
+        <video id="input-video" autoplay playsinline></video>
+    </div>
+
+    <script type="importmap">
+{
+    "imports": {
+        "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+        "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/",
+        "@mediapipe/hands": "https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"
+    }
+}
+</script>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+        // ===== Scene & Camera =====
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x010804);
+        scene.fog = new THREE.FogExp2(0x010804, 0.02);
+
+        const camera = new THREE.PerspectiveCamera(35, window.innerWidth / window.innerHeight, 0.1, 1000);
+        camera.position.set(0, 4, 25);
+
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+        renderer.toneMapping = THREE.ACESFilmicToneMapping;
+        renderer.toneMappingExposure = 1.2;
+        document.body.appendChild(renderer.domElement);
+
+
+        // ===== Globals =====
+        let treeStatus = 'FORMED';
+        let handPos = { x: 0, y: 0 };
+
+        // ===== Tree =====
+        const treeGroup = new THREE.Group();
+        treeGroup.position.y = -2;
+        treeGroup.scale.set(0.9, 0.9, 0.9);
+        scene.add(treeGroup);
+
+        const FOLIAGE_COUNT = 15000;
+        const ORNAMENT_COUNT = 60;
+
+        // ===== Foliage =====
+        const foliageGeometry = new THREE.BufferGeometry();
+        const foliagePositions = new Float32Array(FOLIAGE_COUNT * 3);
+        const foliageChaosPositions = new Float32Array(FOLIAGE_COUNT * 3);
+        const foliageTargetPositions = new Float32Array(FOLIAGE_COUNT * 3);
+
+        for (let i = 0; i < FOLIAGE_COUNT; i++) {
+            const i3 = i * 3;
+            const h = Math.random() * 16;
+            const r = (16 - h) * 0.35;
+            const angle = i * 0.15;
+            foliageTargetPositions[i3] = Math.cos(angle) * r;
+            foliageTargetPositions[i3 + 1] = h - 8;
+            foliageTargetPositions[i3 + 2] = Math.sin(angle) * r;
+
+            const dist = 20 + Math.random() * 10;
+            const theta = Math.random() * Math.PI * 2;
+            const phi = Math.acos(2 * Math.random() - 1);
+            foliageChaosPositions[i3] = dist * Math.sin(phi) * Math.cos(theta);
+            foliageChaosPositions[i3 + 1] = dist * Math.sin(phi) * Math.sin(theta);
+            foliageChaosPositions[i3 + 2] = dist * Math.cos(phi);
+
+            foliagePositions[i3] = foliageTargetPositions[i3];
+            foliagePositions[i3 + 1] = foliageTargetPositions[i3 + 1];
+            foliagePositions[i3 + 2] = foliageTargetPositions[i3 + 2];
+        }
+
+        foliageGeometry.setAttribute('position', new THREE.BufferAttribute(foliagePositions, 3));
+
+        const foliageMaterial = new THREE.ShaderMaterial({
+            uniforms: { uEmerald: { value: new THREE.Color("#004d26") }, uGold: { value: new THREE.Color("#FFD700") } },
+            vertexShader: `
+        varying float vHeight;
+        void main(){
+            vHeight=position.y;
+            vec4 mvPosition=modelViewMatrix*vec4(position,1.0);
+            gl_PointSize=4.5*(20.0/-mvPosition.z);
+            gl_Position=projectionMatrix*mvPosition;
+        }
+    `,
+            fragmentShader: `
+        varying float vHeight;
+        uniform vec3 uEmerald;
+        uniform vec3 uGold;
+        void main(){
+            float d=distance(gl_PointCoord,vec2(0.5));
+            if(d>0.5) discard;
+            vec3 color=mix(uEmerald,uGold,smoothstep(-8.0,8.0,vHeight));
+            gl_FragColor=vec4(color,1.0);
+        }
+    `,
+            transparent: true,
+            blending: THREE.AdditiveBlending,
+            depthWrite: false
+        });
+
+        const foliagePoints = new THREE.Points(foliageGeometry, foliageMaterial);
+        treeGroup.add(foliagePoints);
+
+        // ===== Ornaments =====
+        const ornaments = [];
+        const ornamentChaosTargets = [];
+        const ornamentFormedTargets = [];
+        const ornamentWeights = [];
+
+        for (let i = 0; i < ORNAMENT_COUNT; i++) {
+            let mesh, weight;
+            const type = Math.random();
+            const h = Math.random() * 13 - 5;
+            const r = (13 - h) * (0.2 + Math.random() * 0.12);
+            const angle = Math.random() * Math.PI * 2;
+            const formedTarget = new THREE.Vector3(Math.cos(angle) * r, h, Math.sin(angle) * r);
+            ornamentFormedTargets.push(formedTarget);
+            const chaosTarget = new THREE.Vector3((Math.random() - 0.5) * 40, (Math.random() - 0.5) * 40, (Math.random() - 0.5) * 40);
+            ornamentChaosTargets.push(chaosTarget);
+
+            if (type < 0.3) mesh = new THREE.Mesh(new THREE.BoxGeometry(0.35, 0.35, 0.35), new THREE.MeshStandardMaterial({ color: 0xff0000, metalness: 0.3, roughness: 0.6, flatShading: true })), weight = 0.03, mesh.userData.float = true;
+            else if (type < 0.4) mesh = new THREE.Mesh(new THREE.BoxGeometry(0.35, 0.35, 0.35), new THREE.MeshStandardMaterial({ color: 0x00ff00, metalness: 0.3, roughness: 0.6, flatShading: true })), weight = 0.03, mesh.userData.float = true;
+            else if (type < 0.5) mesh = new THREE.Mesh(new THREE.SphereGeometry(0.2, 16, 16), new THREE.MeshStandardMaterial({ color: 0xFFFF33, emissive: 0xFFFF66, emissiveIntensity: 0.7, metalness: 1.0, roughness: 0.1 })), weight = 0.05, mesh.userData.float = true;
+            else if (type < 0.7) mesh = new THREE.Mesh(new THREE.SphereGeometry(0.2, 16, 16), new THREE.MeshStandardMaterial({ color: 0xFFA533, emissive: 0xFFB266, emissiveIntensity: 0.6, metalness: 1.0, roughness: 0.1 })), weight = 0.05, mesh.userData.float = true;
+            else mesh = new THREE.Mesh(new THREE.SphereGeometry(0.075, 8, 8), new THREE.MeshBasicMaterial({ color: 0xffffff })), weight = 0.07, mesh.userData.float = true;
+
+            mesh.position.copy(formedTarget);
+            ornaments.push(mesh);
+            treeGroup.add(mesh);
+            ornamentWeights.push(weight);
+        }
+
+        // ===== Star =====
+        function createStarShape(outerR, innerR) {
+            const shape = new THREE.Shape();
+            for (let i = 0; i < 5; i++) {
+                const a = i * 2 * Math.PI / 5 - Math.PI / 2;
+                const b = a + Math.PI / 5;
+                const x1 = Math.cos(a) * outerR;
+                const y1 = Math.sin(a) * outerR;
+                const x2 = Math.cos(b) * innerR;
+                const y2 = Math.sin(b) * innerR;
+                if (i === 0) shape.moveTo(x1, y1); else shape.lineTo(x1, y1); shape.lineTo(x2, y2);
+            }
+            shape.closePath();
+            return shape;
+
+            star.material.depthTest = false;
+        }
+
+        const STAR_OUTER = 0.6, STAR_INNER = 0.25, STAR_DEPTH = 0.3;
+        const starGeometry = new THREE.ExtrudeGeometry(createStarShape(STAR_OUTER, STAR_INNER), { depth: STAR_DEPTH, bevelEnabled: true, bevelThickness: 0.08, bevelSize: 0.06, bevelSegments: 3 });
+        starGeometry.rotateZ(Math.PI / 2);
+        const starMaterial = new THREE.MeshStandardMaterial({ color: 0xFFD700, emissive: 0xFFD700, emissiveIntensity: 1.3, metalness: 0.85, roughness: 0.25 });
+        const star = new THREE.Mesh(starGeometry, starMaterial);
+        star.position.set(0, 8, 0);
+        star.userData.baseY = 8;
+        star.userData.formed = new THREE.Vector3(0, 8, 0);
+        star.userData.chaos = new THREE.Vector3((Math.random() - 0.5) * 40, (Math.random() - 0.5) * 40, (Math.random() - 0.5) * 40);
+        treeGroup.add(star);
+
+        // ===== Lights =====
+        scene.add(new THREE.AmbientLight(0xffffff, 0.4));
+        const topGoldLight = new THREE.PointLight(0xFFD700, 50, 40); topGoldLight.position.set(0, 10, 5); scene.add(topGoldLight);
+        const sideLight = new THREE.DirectionalLight(0xffffff, 1.5); sideLight.position.set(10, 5, 10); scene.add(sideLight);
+
+        // ===== Hands (Mediapipe) =====
+        const videoElement = document.getElementById('input-video');
+        async function setupHands() {
+            const hands = new window.Hands({ locateFile: f => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}` });
+            hands.setOptions({ maxNumHands: 1, modelComplexity: 1, minDetectionConfidence: 0.7 });
+            hands.onResults(res => {
+                if (res.multiHandLandmarks && res.multiHandLandmarks.length > 0) {
+                    const lm = res.multiHandLandmarks[0];
+                    treeStatus = lm[8].y < lm[5].y - 0.1 ? 'CHAOS' : 'FORMED';
+                    handPos.x = (lm[9].x - 0.5) * 12;
+                    handPos.y = -(lm[9].y - 0.5) * 10;
+                }
+            });
+            const cam = new window.Camera(videoElement, { onFrame: async () => await hands.send({ image: videoElement }) });
+            cam.start();
+        }
+        const s1 = document.createElement('script'); s1.src = "https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js";
+        const s2 = document.createElement('script'); s2.src = "https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js";
+        s2.onload = setupHands;
+        document.head.appendChild(s1);
+        document.head.appendChild(s2);
+
+        // ===== Snow Particles =====
+        const snowCount = 300;
+        const snowGeo = new THREE.BufferGeometry();
+        const snowPos = new Float32Array(snowCount * 3);
+        const snowSizes = new Float32Array(snowCount);
+        const snowSpeeds = new Float32Array(snowCount);
+        const snowColors = [];
+
+        for (let i = 0; i < snowCount; i++) {
+            snowPos[i * 3] = (Math.random() - 0.5) * 50;
+            snowPos[i * 3 + 1] = Math.random() * 30;
+            snowPos[i * 3 + 2] = (Math.random() - 0.5) * 50;
+            snowSizes[i] = 0.1 + Math.random() * 0.2;
+            snowSpeeds[i] = 0.02 + Math.random() * 0.03;
+            snowColors.push(Math.random() < 0.9 ? 0xffffff : 0xfff8dc); // 大部分白，少量淡金
+        }
+        snowGeo.setAttribute('position', new THREE.BufferAttribute(snowPos, 3));
+        snowGeo.setAttribute('size', new THREE.BufferAttribute(snowSizes, 1));
+        const snowMat = new THREE.PointsMaterial({
+            size: 0.2,
+            vertexColors: false,
+            color: 0xffffff,
+            transparent: true,
+            opacity: 0.9
+        });
+        const snowPoints = new THREE.Points(snowGeo, snowMat);
+        scene.add(snowPoints);
+
+
+        // ===== Ribbon Particles (Wrap Tree Properly) =====
+        const ribbonCount = 1000;
+        const ribbonGeo = new THREE.BufferGeometry();
+        const ribbonPos = new Float32Array(ribbonCount * 3);
+
+        const ribbonFormed = [];
+        const ribbonChaos = [];
+        const ribbonOffsets = [];
+
+        // ⭐ 与树体匹配的参数
+        const TREE_HEIGHT = 15;      // ≈ foliage 高度
+        const TREE_BASE_RADIUS = 8;  // ≈ foliage 底部半径
+        const WRAP_TURNS = 10;        // 缠绕圈数（越大越密）
+
+        for (let i = 0; i < ribbonCount; i++) {
+            const t = i / ribbonCount;           // 0 → 1
+            const y = -7 + t * TREE_HEIGHT;      // 树底 → 树顶
+
+            // ⭐ 关键：锥体半径公式
+            const radius = (1 - t) * TREE_BASE_RADIUS * 0.85;
+
+            const angle = t * Math.PI * 2 * WRAP_TURNS;
+
+            const x = Math.cos(angle) * radius;
+            const z = Math.sin(angle) * radius;
+
+            ribbonPos[i * 3] = x;
+            ribbonPos[i * 3 + 1] = y;
+            ribbonPos[i * 3 + 2] = z;
+
+            ribbonFormed.push(new THREE.Vector3(x, y, z));
+
+            // CHAOS 状态：完全炸开
+            ribbonChaos.push(
+                new THREE.Vector3(
+                    (Math.random() - 0.5) * 35,
+                    (Math.random() - 0.5) * 20,
+                    (Math.random() - 0.5) * 35
+                )
+            );
+
+            ribbonOffsets.push(Math.random() * Math.PI * 2);
+        }
+
+        ribbonGeo.setAttribute('position', new THREE.BufferAttribute(ribbonPos, 3));
+
+        const ribbonMat = new THREE.PointsMaterial({
+            color: 0x00ff66,
+            size: 0.23,
+            transparent: true,
+            opacity: 0.85
+        });
+
+        const ribbonPoints = new THREE.Points(ribbonGeo, ribbonMat);
+        treeGroup.add(ribbonPoints);
+
+
+        function animateRibbon(t) {
+            const positions = ribbonGeo.attributes.position.array;
+
+            for (let i = 0; i < ribbonCount; i++) {
+                const target = treeStatus === 'CHAOS' ? ribbonChaos[i] : ribbonFormed[i];
+
+                // 轻微沿切线抖动，看起来像丝带在呼吸
+                const sway = Math.sin(t * 2 + ribbonOffsets[i]) * 0.12;
+
+                positions[i * 3] = THREE.MathUtils.lerp(
+                    positions[i * 3],
+                    target.x + sway,
+                    0.06
+                );
+                positions[i * 3 + 1] = THREE.MathUtils.lerp(
+                    positions[i * 3 + 1],
+                    target.y,
+                    0.06
+                );
+                positions[i * 3 + 2] = THREE.MathUtils.lerp(
+                    positions[i * 3 + 2],
+                    target.z + sway,
+                    0.06
+                );
+            }
+
+            ribbonGeo.attributes.position.needsUpdate = true;
+        }
+
+        // ===== Animate Snow =====
+        function animateSnow(t) {
+            const positions = snowGeo.attributes.position.array;
+            for (let i = 0; i < snowCount; i++) {
+                positions[i * 3 + 1] -= snowSpeeds[i];         // 下落
+                positions[i * 3] += Math.sin(t + i) * 0.01;     // 飘动
+                positions[i * 3 + 2] += Math.cos(t + i * 0.5) * 0.01; // 横向轻微晃动
+                if (positions[i * 3 + 1] < -5) positions[i * 3 + 1] = 30; // 重置
+            }
+            snowGeo.attributes.position.needsUpdate = true;
+        }
+
+
+        // ===== Animate =====
+        function animate() {
+            const t = performance.now() * 0.001;
+            requestAnimationFrame(animate);
+
+            // Foliage
+            const foliagePos = foliageGeometry.attributes.position;
+            const step = treeStatus === 'CHAOS' ? 0.05 : 0.08;
+            for (let i = 0; i < FOLIAGE_COUNT; i++) {
+                const i3 = i * 3;
+                const targetArr = treeStatus === 'CHAOS' ? foliageChaosPositions : foliageTargetPositions;
+                foliagePos.array[i3] = THREE.MathUtils.lerp(foliagePos.array[i3], targetArr[i3], step);
+                foliagePos.array[i3 + 1] = THREE.MathUtils.lerp(foliagePos.array[i3 + 1], targetArr[i3 + 1], step);
+                foliagePos.array[i3 + 2] = THREE.MathUtils.lerp(foliagePos.array[i3 + 2], targetArr[i3 + 2], step);
+                if (treeStatus === 'FORMED') foliagePos.array[i3 + 1] += Math.sin(t * 2 + i) * 0.02;
+            }
+            foliagePos.needsUpdate = true;
+
+            // Ornaments
+            ornaments.forEach((mesh, i) => {
+                const target = treeStatus === 'CHAOS' ? ornamentChaosTargets[i] : ornamentFormedTargets[i];
+                mesh.position.lerp(target, ornamentWeights[i]);
+                if (mesh.userData.float) mesh.position.y += Math.sin(Date.now() * 0.002 + i) * 0.003;
+            });
+
+            // Star
+            const starTarget = treeStatus === 'CHAOS' ? star.userData.chaos : star.userData.formed;
+            star.position.lerp(starTarget, 0.08);
+            if (treeStatus === 'FORMED') {
+                star.position.y = star.userData.baseY + Math.sin(t * 1.5) * 0.25;
+                star.rotation.z = Math.sin(t * 0.8) * 0.05;
+                star.material.emissiveIntensity = 1.2 + Math.sin(t * 1.5) * 0.2;
+            }
+            animateSnow(t);
+            animateRibbon(t);
+
+            // 控制 Merry Christmas 显示
+            const titleEl = document.getElementById('merry-title');
+            titleEl.style.display = (treeStatus === 'FORMED') ? 'block' : 'none';
+
+            // Camera follow hand
+            camera.position.x += (handPos.x - camera.position.x) * 0.05;
+            camera.position.y += (4 + handPos.y - camera.position.y) * 0.05;
+            camera.lookAt(0, 0, 0);
+
+            renderer.render(scene, camera);
+        }
+        animate();
+
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+    </script>
+</body>
+
+</html>
